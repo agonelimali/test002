@@ -1,0 +1,581 @@
+=== SOLUTION ARCHITECTURE BLUEPRINT ===
+
+Device Models and Roles:
+- Core Router 1: Juniper MX204 - Primary Core Router, OSPF Backbone, Inter-VLAN Routing, Data Center Aggregation
+- Core Router 2: Juniper MX204 - Secondary Core Router, OSPF Backbone, Redundancy, Data Center Aggregation
+- Distribution Switch 1: Juniper EX4650 - Primary Distribution, VLAN Aggregation, Layer 3 Routing
+- Distribution Switch 2: Juniper EX4650 - Secondary Distribution, VLAN Aggregation, Layer 3 Routing, Redundancy
+- Access Switch 1: Juniper EX3400 - Medical IoT Access, Port Security, VLAN Assignment
+- Access Switch 2: Juniper EX3400 - Clinical/Administrative Access, Port Security, VLAN Assignment
+- Security Gateway: Juniper SRX340 - Firewall, HIPAA Policy Enforcement, Intrusion Prevention, Segmentation
+
+Network Topology Description:
+- Highly redundant dual-core design with two MX204 routers interconnected via /30 P2P links.
+- Distribution layer with dual EX4650 switches, each uplinked redundantly to both core routers.
+- Access layer with two EX3400 switches, each dual-homed to both distribution switches for redundancy.
+- Security gateway (SRX340) positioned between core and external networks, enforcing HIPAA-compliant segmentation and policies.
+- All critical VLANs (Medical IoT, Clinical, Administrative, Emergency, Telemedicine, EHR, Alerts) are segmented and routed at the core/distribution layer.
+- OSPF used for dynamic routing, with static routes for management and external connectivity.
+- SNMP, syslog, and NTP configured for compliance and monitoring.
+- All P2P links use /30 subnets from 10.10.255.0/24, with matching interface descriptions and IPs.
+
+---
+
+=== DEVICE 1: CORE-ROUTER-1 (MX204) ===
+! ===== SECTION: Basic Configuration =====
+set system host-name CORE-ROUTER-1
+set system domain-name healthcare.local
+set system root-authentication encrypted-password "$6$abc123core1"
+set system login user netadmin class super-user authentication encrypted-password "$6$netadmincore1"
+set system login user auditor class read-only authentication encrypted-password "$6$auditcore1"
+set system services ssh
+set system services netconf ssh
+set system services web-management https interface lo0.0
+set system services xnm-clear-text
+set system services snmp
+set system syslog user * any emergency
+set system syslog file messages any info
+set system syslog file interactive interactive-commands any
+set system ntp server 192.0.2.10
+set system ntp server 192.0.2.11
+set system time-zone UTC
+set system archival configuration transfer-on-commit
+set system services dhcp-local-server group MGMT interfaces em0.0
+set system services dhcp-local-server group MGMT overrides no-dhcp-option82
+set system services dhcp-local-server group MGMT overrides always-write-giaddr
+set system services dhcp-local-server group MGMT overrides always-broadcast
+set system services dhcp-local-server group MGMT overrides always-reply-rfc1048
+set system services dhcp-local-server group MGMT overrides always-send-option-82
+set system services dhcp-local-server group MGMT overrides always-include-option-82
+set snmp community public authorization read-only
+set snmp community healthnet authorization read-only
+set snmp location "Data Center 1"
+set snmp contact "netops@healthcare.local"
+commit and-quit
+! ===== END SECTION =====
+
+! ===== SECTION: Interface Configuration =====
+set interfaces xe-0/0/0 description "To CORE-ROUTER-2 xe-0/0/0"
+set interfaces xe-0/0/0 unit 0 family inet address 10.10.255.1/30
+set interfaces xe-0/0/1 description "To DIST-SW1 xe-0/0/0"
+set interfaces xe-0/0/1 unit 0 family inet address 10.10.255.5/30
+set interfaces xe-0/0/2 description "To DIST-SW2 xe-0/0/0"
+set interfaces xe-0/0/2 unit 0 family inet address 10.10.255.9/30
+set interfaces lo0 unit 0 family inet address 10.255.0.1/32
+set interfaces em0 description "Management"
+set interfaces em0 unit 0 family inet address 192.168.100.1/24
+! ===== END SECTION =====
+
+! ===== SECTION: VLAN & Layer 3 Interface Configuration =====
+set vlans MEDICAL-IOT vlan-id 10
+set vlans CLINICAL-SYSTEMS vlan-id 20
+set vlans ADMINISTRATIVE vlan-id 30
+set vlans EMERGENCY vlan-id 40
+set vlans TELEMEDICINE vlan-id 50
+set vlans EHR vlan-id 60
+set vlans ALERTS vlan-id 70
+set interfaces irb unit 10 family inet address 172.16.0.1/24
+set interfaces irb unit 20 family inet address 10.1.0.1/24
+set interfaces irb unit 30 family inet address 10.2.0.1/24
+set interfaces irb unit 40 family inet address 10.10.40.1/24
+set interfaces irb unit 50 family inet address 10.10.50.1/24
+set interfaces irb unit 60 family inet address 10.10.60.1/24
+set interfaces irb unit 70 family inet address 10.10.70.1/24
+set vlans MEDICAL-IOT l3-interface irb.10
+set vlans CLINICAL-SYSTEMS l3-interface irb.20
+set vlans ADMINISTRATIVE l3-interface irb.30
+set vlans EMERGENCY l3-interface irb.40
+set vlans TELEMEDICINE l3-interface irb.50
+set vlans EHR l3-interface irb.60
+set vlans ALERTS l3-interface irb.70
+! ===== END SECTION =====
+
+! ===== SECTION: Routing Protocols =====
+set routing-options router-id 10.255.0.1
+set routing-options static route 0.0.0.0/0 next-hop 10.10.255.14
+set protocols ospf area 0.0.0.0 interface xe-0/0/0.0
+set protocols ospf area 0.0.0.0 interface xe-0/0/1.0
+set protocols ospf area 0.0.0.0 interface xe-0/0/2.0
+set protocols ospf area 0.0.0.0 interface lo0.0 passive
+set protocols ospf area 0.0.0.0 interface irb.10 passive
+set protocols ospf area 0.0.0.0 interface irb.20 passive
+set protocols ospf area 0.0.0.0 interface irb.30 passive
+set protocols ospf area 0.0.0.0 interface irb.40 passive
+set protocols ospf area 0.0.0.0 interface irb.50 passive
+set protocols ospf area 0.0.0.0 interface irb.60 passive
+set protocols ospf area 0.0.0.0 interface irb.70 passive
+! ===== END SECTION =====
+
+! ===== SECTION: Security & Management =====
+set security zones security-zone trust interfaces irb.10 host-inbound-traffic system-services all
+set security zones security-zone trust interfaces irb.20 host-inbound-traffic system-services all
+set security zones security-zone trust interfaces irb.30 host-inbound-traffic system-services all
+set security zones security-zone trust interfaces irb.40 host-inbound-traffic system-services all
+set security zones security-zone trust interfaces irb.50 host-inbound-traffic system-services all
+set security zones security-zone trust interfaces irb.60 host-inbound-traffic system-services all
+set security zones security-zone trust interfaces irb.70 host-inbound-traffic system-services all
+set security zones security-zone mgmt interfaces em0.0 host-inbound-traffic system-services ssh
+set security zones security-zone mgmt interfaces em0.0 host-inbound-traffic system-services snmp
+set security zones security-zone mgmt interfaces em0.0 host-inbound-traffic system-services https
+set security zones security-zone mgmt interfaces em0.0 host-inbound-traffic system-services netconf
+set security zones security-zone mgmt interfaces em0.0 host-inbound-traffic system-services ping
+set security zones security-zone mgmt interfaces em0.0 host-inbound-traffic system-services ntp
+! ===== END SECTION =====
+
+---
+
+=== DEVICE 2: CORE-ROUTER-2 (MX204) ===
+! ===== SECTION: Basic Configuration =====
+set system host-name CORE-ROUTER-2
+set system domain-name healthcare.local
+set system root-authentication encrypted-password "$6$abc123core2"
+set system login user netadmin class super-user authentication encrypted-password "$6$netadmincore2"
+set system login user auditor class read-only authentication encrypted-password "$6$auditcore2"
+set system services ssh
+set system services netconf ssh
+set system services web-management https interface lo0.0
+set system services xnm-clear-text
+set system services snmp
+set system syslog user * any emergency
+set system syslog file messages any info
+set system syslog file interactive interactive-commands any
+set system ntp server 192.0.2.10
+set system ntp server 192.0.2.11
+set system time-zone UTC
+set system archival configuration transfer-on-commit
+set system services dhcp-local-server group MGMT interfaces em0.0
+set snmp community public authorization read-only
+set snmp community healthnet authorization read-only
+set snmp location "Data Center 2"
+set snmp contact "netops@healthcare.local"
+commit and-quit
+! ===== END SECTION =====
+
+! ===== SECTION: Interface Configuration =====
+set interfaces xe-0/0/0 description "To CORE-ROUTER-1 xe-0/0/0"
+set interfaces xe-0/0/0 unit 0 family inet address 10.10.255.2/30
+set interfaces xe-0/0/1 description "To DIST-SW1 xe-0/0/1"
+set interfaces xe-0/0/1 unit 0 family inet address 10.10.255.6/30
+set interfaces xe-0/0/2 description "To DIST-SW2 xe-0/0/1"
+set interfaces xe-0/0/2 unit 0 family inet address 10.10.255.10/30
+set interfaces lo0 unit 0 family inet address 10.255.0.2/32
+set interfaces em0 description "Management"
+set interfaces em0 unit 0 family inet address 192.168.100.2/24
+! ===== END SECTION =====
+
+! ===== SECTION: VLAN & Layer 3 Interface Configuration =====
+set vlans MEDICAL-IOT vlan-id 10
+set vlans CLINICAL-SYSTEMS vlan-id 20
+set vlans ADMINISTRATIVE vlan-id 30
+set vlans EMERGENCY vlan-id 40
+set vlans TELEMEDICINE vlan-id 50
+set vlans EHR vlan-id 60
+set vlans ALERTS vlan-id 70
+set interfaces irb unit 10 family inet address 172.16.0.2/24
+set interfaces irb unit 20 family inet address 10.1.0.2/24
+set interfaces irb unit 30 family inet address 10.2.0.2/24
+set interfaces irb unit 40 family inet address 10.10.40.2/24
+set interfaces irb unit 50 family inet address 10.10.50.2/24
+set interfaces irb unit 60 family inet address 10.10.60.2/24
+set interfaces irb unit 70 family inet address 10.10.70.2/24
+set vlans MEDICAL-IOT l3-interface irb.10
+set vlans CLINICAL-SYSTEMS l3-interface irb.20
+set vlans ADMINISTRATIVE l3-interface irb.30
+set vlans EMERGENCY l3-interface irb.40
+set vlans TELEMEDICINE l3-interface irb.50
+set vlans EHR l3-interface irb.60
+set vlans ALERTS l3-interface irb.70
+! ===== END SECTION =====
+
+! ===== SECTION: Routing Protocols =====
+set routing-options router-id 10.255.0.2
+set routing-options static route 0.0.0.0/0 next-hop 10.10.255.14
+set protocols ospf area 0.0.0.0 interface xe-0/0/0.0
+set protocols ospf area 0.0.0.0 interface xe-0/0/1.0
+set protocols ospf area 0.0.0.0 interface xe-0/0/2.0
+set protocols ospf area 0.0.0.0 interface lo0.0 passive
+set protocols ospf area 0.0.0.0 interface irb.10 passive
+set protocols ospf area 0.0.0.0 interface irb.20 passive
+set protocols ospf area 0.0.0.0 interface irb.30 passive
+set protocols ospf area 0.0.0.0 interface irb.40 passive
+set protocols ospf area 0.0.0.0 interface irb.50 passive
+set protocols ospf area 0.0.0.0 interface irb.60 passive
+set protocols ospf area 0.0.0.0 interface irb.70 passive
+! ===== END SECTION =====
+
+! ===== SECTION: Security & Management =====
+set security zones security-zone trust interfaces irb.10 host-inbound-traffic system-services all
+set security zones security-zone trust interfaces irb.20 host-inbound-traffic system-services all
+set security zones security-zone trust interfaces irb.30 host-inbound-traffic system-services all
+set security zones security-zone trust interfaces irb.40 host-inbound-traffic system-services all
+set security zones security-zone trust interfaces irb.50 host-inbound-traffic system-services all
+set security zones security-zone trust interfaces irb.60 host-inbound-traffic system-services all
+set security zones security-zone trust interfaces irb.70 host-inbound-traffic system-services all
+set security zones security-zone mgmt interfaces em0.0 host-inbound-traffic system-services ssh
+set security zones security-zone mgmt interfaces em0.0 host-inbound-traffic system-services snmp
+set security zones security-zone mgmt interfaces em0.0 host-inbound-traffic system-services https
+set security zones security-zone mgmt interfaces em0.0 host-inbound-traffic system-services netconf
+set security zones security-zone mgmt interfaces em0.0 host-inbound-traffic system-services ping
+set security zones security-zone mgmt interfaces em0.0 host-inbound-traffic system-services ntp
+! ===== END SECTION =====
+
+---
+
+=== DEVICE 3: DIST-SW1 (EX4650) ===
+! ===== SECTION: Basic Configuration =====
+set system host-name DIST-SW1
+set system domain-name healthcare.local
+set system root-authentication encrypted-password "$6$dist1root"
+set system login user netadmin class super-user authentication encrypted-password "$6$dist1netadmin"
+set system login user auditor class read-only authentication encrypted-password "$6$dist1auditor"
+set system services ssh
+set system services netconf ssh
+set system services web-management https interface lo0.0
+set system services snmp
+set system syslog user * any emergency
+set system syslog file messages any info
+set system ntp server 192.0.2.10
+set system ntp server 192.0.2.11
+set system time-zone UTC
+set snmp community healthnet authorization read-only
+set snmp location "Distribution 1"
+set snmp contact "netops@healthcare.local"
+commit and-quit
+! ===== END SECTION =====
+
+! ===== SECTION: VLAN & Trunking =====
+set vlans MEDICAL-IOT vlan-id 10
+set vlans CLINICAL-SYSTEMS vlan-id 20
+set vlans ADMINISTRATIVE vlan-id 30
+set vlans EMERGENCY vlan-id 40
+set vlans TELEMEDICINE vlan-id 50
+set vlans EHR vlan-id 60
+set vlans ALERTS vlan-id 70
+set interfaces xe-0/0/2 description "To ACCESS-SW1 xe-0/0/0"
+set interfaces xe-0/0/2 unit 0 family ethernet-switching port-mode trunk
+set interfaces xe-0/0/2 unit 0 family ethernet-switching vlan members [ MEDICAL-IOT CLINICAL-SYSTEMS ]
+set interfaces xe-0/0/3 description "To ACCESS-SW2 xe-0/0/0"
+set interfaces xe-0/0/3 unit 0 family ethernet-switching port-mode trunk
+set interfaces xe-0/0/3 unit 0 family ethernet-switching vlan members [ ADMINISTRATIVE EMERGENCY TELEMEDICINE EHR ALERTS ]
+! ===== END SECTION =====
+
+! ===== SECTION: Interface Configuration =====
+set interfaces xe-0/0/0 description "To CORE-ROUTER-1 xe-0/0/1"
+set interfaces xe-0/0/0 unit 0 family inet address 10.10.255.6/30
+set interfaces xe-0/0/1 description "To CORE-ROUTER-2 xe-0/0/1"
+set interfaces xe-0/0/1 unit 0 family inet address 10.10.255.5/30
+set interfaces lo0 unit 0 family inet address 10.255.1.1/32
+set interfaces em0 description "Management"
+set interfaces em0 unit 0 family inet address 192.168.100.3/24
+! ===== END SECTION =====
+
+! ===== SECTION: Layer 3 Routing =====
+set routing-options router-id 10.255.1.1
+set protocols ospf area 0.0.0.0 interface xe-0/0/0.0
+set protocols ospf area 0.0.0.0 interface xe-0/0/1.0
+set protocols ospf area 0.0.0.0 interface lo0.0 passive
+set protocols ospf area 0.0.0.0 interface vlan.10 passive
+set protocols ospf area 0.0.0.0 interface vlan.20 passive
+set protocols ospf area 0.0.0.0 interface vlan.30 passive
+set protocols ospf area 0.0.0.0 interface vlan.40 passive
+set protocols ospf area 0.0.0.0 interface vlan.50 passive
+set protocols ospf area 0.0.0.0 interface vlan.60 passive
+set protocols ospf area 0.0.0.0 interface vlan.70 passive
+! ===== END SECTION =====
+
+---
+
+=== DEVICE 4: DIST-SW2 (EX4650) ===
+! ===== SECTION: Basic Configuration =====
+set system host-name DIST-SW2
+set system domain-name healthcare.local
+set system root-authentication encrypted-password "$6$dist2root"
+set system login user netadmin class super-user authentication encrypted-password "$6$dist2netadmin"
+set system login user auditor class read-only authentication encrypted-password "$6$dist2auditor"
+set system services ssh
+set system services netconf ssh
+set system services web-management https interface lo0.0
+set system services snmp
+set system syslog user * any emergency
+set system syslog file messages any info
+set system ntp server 192.0.2.10
+set system ntp server 192.0.2.11
+set system time-zone UTC
+set snmp community healthnet authorization read-only
+set snmp location "Distribution 2"
+set snmp contact "netops@healthcare.local"
+commit and-quit
+! ===== END SECTION =====
+
+! ===== SECTION: VLAN & Trunking =====
+set vlans MEDICAL-IOT vlan-id 10
+set vlans CLINICAL-SYSTEMS vlan-id 20
+set vlans ADMINISTRATIVE vlan-id 30
+set vlans EMERGENCY vlan-id 40
+set vlans TELEMEDICINE vlan-id 50
+set vlans EHR vlan-id 60
+set vlans ALERTS vlan-id 70
+set interfaces xe-0/0/2 description "To ACCESS-SW1 xe-0/0/1"
+set interfaces xe-0/0/2 unit 0 family ethernet-switching port-mode trunk
+set interfaces xe-0/0/2 unit 0 family ethernet-switching vlan members [ MEDICAL-IOT CLINICAL-SYSTEMS ]
+set interfaces xe-0/0/3 description "To ACCESS-SW2 xe-0/0/1"
+set interfaces xe-0/0/3 unit 0 family ethernet-switching port-mode trunk
+set interfaces xe-0/0/3 unit 0 family ethernet-switching vlan members [ ADMINISTRATIVE EMERGENCY TELEMEDICINE EHR ALERTS ]
+! ===== END SECTION =====
+
+! ===== SECTION: Interface Configuration =====
+set interfaces xe-0/0/0 description "To CORE-ROUTER-1 xe-0/0/2"
+set interfaces xe-0/0/0 unit 0 family inet address 10.10.255.10/30
+set interfaces xe-0/0/1 description "To CORE-ROUTER-2 xe-0/0/2"
+set interfaces xe-0/0/1 unit 0 family inet address 10.10.255.9/30
+set interfaces lo0 unit 0 family inet address 10.255.1.2/32
+set interfaces em0 description "Management"
+set interfaces em0 unit 0 family inet address 192.168.100.4/24
+! ===== END SECTION =====
+
+! ===== SECTION: Layer 3 Routing =====
+set routing-options router-id 10.255.1.2
+set protocols ospf area 0.0.0.0 interface xe-0/0/0.0
+set protocols ospf area 0.0.0.0 interface xe-0/0/1.0
+set protocols ospf area 0.0.0.0 interface lo0.0 passive
+set protocols ospf area 0.0.0.0 interface vlan.10 passive
+set protocols ospf area 0.0.0.0 interface vlan.20 passive
+set protocols ospf area 0.0.0.0 interface vlan.30 passive
+set protocols ospf area 0.0.0.0 interface vlan.40 passive
+set protocols ospf area 0.0.0.0 interface vlan.50 passive
+set protocols ospf area 0.0.0.0 interface vlan.60 passive
+set protocols ospf area 0.0.0.0 interface vlan.70 passive
+! ===== END SECTION =====
+
+---
+
+=== DEVICE 5: ACCESS-SW1 (EX3400) ===
+! ===== SECTION: Basic Configuration =====
+set system host-name ACCESS-SW1
+set system domain-name healthcare.local
+set system root-authentication encrypted-password "$6$access1root"
+set system login user netadmin class super-user authentication encrypted-password "$6$access1netadmin"
+set system login user auditor class read-only authentication encrypted-password "$6$access1auditor"
+set system services ssh
+set system services netconf ssh
+set system services snmp
+set system syslog user * any emergency
+set system syslog file messages any info
+set system ntp server 192.0.2.10
+set system ntp server 192.0.2.11
+set system time-zone UTC
+set snmp community healthnet authorization read-only
+set snmp location "Access 1"
+set snmp contact "netops@healthcare.local"
+commit and-quit
+! ===== END SECTION =====
+
+! ===== SECTION: VLAN Assignment =====
+set vlans MEDICAL-IOT vlan-id 10
+set vlans CLINICAL-SYSTEMS vlan-id 20
+set interfaces ge-0/0/1 description "Medical IoT Device 1"
+set interfaces ge-0/0/1 unit 0 family ethernet-switching port-mode access
+set interfaces ge-0/0/1 unit 0 family ethernet-switching vlan members MEDICAL-IOT
+set interfaces ge-0/0/2 description "Medical IoT Device 2"
+set interfaces ge-0/0/2 unit 0 family ethernet-switching port-mode access
+set interfaces ge-0/0/2 unit 0 family ethernet-switching vlan members MEDICAL-IOT
+set interfaces ge-0/0/3 description "Clinical Workstation 1"
+set interfaces ge-0/0/3 unit 0 family ethernet-switching port-mode access
+set interfaces ge-0/0/3 unit 0 family ethernet-switching vlan members CLINICAL-SYSTEMS
+set interfaces ge-0/0/4 description "Clinical Workstation 2"
+set interfaces ge-0/0/4 unit 0 family ethernet-switching port-mode access
+set interfaces ge-0/0/4 unit 0 family ethernet-switching vlan members CLINICAL-SYSTEMS
+! ===== END SECTION =====
+
+! ===== SECTION: Trunk Links =====
+set interfaces xe-0/0/0 description "To DIST-SW1 xe-0/0/2"
+set interfaces xe-0/0/0 unit 0 family ethernet-switching port-mode trunk
+set interfaces xe-0/0/0 unit 0 family ethernet-switching vlan members [ MEDICAL-IOT CLINICAL-SYSTEMS ]
+set interfaces xe-0/0/1 description "To DIST-SW2 xe-0/0/2"
+set interfaces xe-0/0/1 unit 0 family ethernet-switching port-mode trunk
+set interfaces xe-0/0/1 unit 0 family ethernet-switching vlan members [ MEDICAL-IOT CLINICAL-SYSTEMS ]
+! ===== END SECTION =====
+
+! ===== SECTION: Port Security =====
+set ethernet-switching-options secure-access-port interface ge-0/0/1 allowed-mac-count 2
+set ethernet-switching-options secure-access-port interface ge-0/0/2 allowed-mac-count 2
+set ethernet-switching-options secure-access-port interface ge-0/0/3 allowed-mac-count 1
+set ethernet-switching-options secure-access-port interface ge-0/0/4 allowed-mac-count 1
+set ethernet-switching-options secure-access-port interface ge-0/0/1 restrict
+set ethernet-switching-options secure-access-port interface ge-0/0/2 restrict
+set ethernet-switching-options secure-access-port interface ge-0/0/3 restrict
+set ethernet-switching-options secure-access-port interface ge-0/0/4 restrict
+! ===== END SECTION =====
+
+---
+
+=== DEVICE 6: ACCESS-SW2 (EX3400) ===
+! ===== SECTION: Basic Configuration =====
+set system host-name ACCESS-SW2
+set system domain-name healthcare.local
+set system root-authentication encrypted-password "$6$access2root"
+set system login user netadmin class super-user authentication encrypted-password "$6$access2netadmin"
+set system login user auditor class read-only authentication encrypted-password "$6$access2auditor"
+set system services ssh
+set system services netconf ssh
+set system services snmp
+set system syslog user * any emergency
+set system syslog file messages any info
+set system ntp server 192.0.2.10
+set system ntp server 192.0.2.11
+set system time-zone UTC
+set snmp community healthnet authorization read-only
+set snmp location "Access 2"
+set snmp contact "netops@healthcare.local"
+commit and-quit
+! ===== END SECTION =====
+
+! ===== SECTION: VLAN Assignment =====
+set vlans ADMINISTRATIVE vlan-id 30
+set vlans EMERGENCY vlan-id 40
+set vlans TELEMEDICINE vlan-id 50
+set vlans EHR vlan-id 60
+set vlans ALERTS vlan-id 70
+set interfaces ge-0/0/1 description "Admin Workstation 1"
+set interfaces ge-0/0/1 unit 0 family ethernet-switching port-mode access
+set interfaces ge-0/0/1 unit 0 family ethernet-switching vlan members ADMINISTRATIVE
+set interfaces ge-0/0/2 description "Admin Workstation 2"
+set interfaces ge-0/0/2 unit 0 family ethernet-switching port-mode access
+set interfaces ge-0/0/2 unit 0 family ethernet-switching vlan members ADMINISTRATIVE
+set interfaces ge-0/0/3 description "Emergency Console"
+set interfaces ge-0/0/3 unit 0 family ethernet-switching port-mode access
+set interfaces ge-0/0/3 unit 0 family ethernet-switching vlan members EMERGENCY
+set interfaces ge-0/0/4 description "Telemedicine Video Endpoint"
+set interfaces ge-0/0/4 unit 0 family ethernet-switching port-mode access
+set interfaces ge-0/0/4 unit 0 family ethernet-switching vlan members TELEMEDICINE
+set interfaces ge-0/0/5 description "EHR Server"
+set interfaces ge-0/0/5 unit 0 family ethernet-switching port-mode access
+set interfaces ge-0/0/5 unit 0 family ethernet-switching vlan members EHR
+set interfaces ge-0/0/6 description "Alert Aggregator"
+set interfaces ge-0/0/6 unit 0 family ethernet-switching port-mode access
+set interfaces ge-0/0/6 unit 0 family ethernet-switching vlan members ALERTS
+! ===== END SECTION =====
+
+! ===== SECTION: Trunk Links =====
+set interfaces xe-0/0/0 description "To DIST-SW1 xe-0/0/3"
+set interfaces xe-0/0/0 unit 0 family ethernet-switching port-mode trunk
+set interfaces xe-0/0/0 unit 0 family ethernet-switching vlan members [ ADMINISTRATIVE EMERGENCY TELEMEDICINE EHR ALERTS ]
+set interfaces xe-0/0/1 description "To DIST-SW2 xe-0/0/3"
+set interfaces xe-0/0/1 unit 0 family ethernet-switching port-mode trunk
+set interfaces xe-0/0/1 unit 0 family ethernet-switching vlan members [ ADMINISTRATIVE EMERGENCY TELEMEDICINE EHR ALERTS ]
+! ===== END SECTION =====
+
+! ===== SECTION: Port Security =====
+set ethernet-switching-options secure-access-port interface ge-0/0/1 allowed-mac-count 1
+set ethernet-switching-options secure-access-port interface ge-0/0/2 allowed-mac-count 1
+set ethernet-switching-options secure-access-port interface ge-0/0/3 allowed-mac-count 1
+set ethernet-switching-options secure-access-port interface ge-0/0/4 allowed-mac-count 2
+set ethernet-switching-options secure-access-port interface ge-0/0/5 allowed-mac-count 1
+set ethernet-switching-options secure-access-port interface ge-0/0/6 allowed-mac-count 1
+set ethernet-switching-options secure-access-port interface ge-0/0/1 restrict
+set ethernet-switching-options secure-access-port interface ge-0/0/2 restrict
+set ethernet-switching-options secure-access-port interface ge-0/0/3 restrict
+set ethernet-switching-options secure-access-port interface ge-0/0/4 restrict
+set ethernet-switching-options secure-access-port interface ge-0/0/5 restrict
+set ethernet-switching-options secure-access-port interface ge-0/0/6 restrict
+! ===== END SECTION =====
+
+---
+
+=== DEVICE 7: SECURITY-GW (SRX340) ===
+! ===== SECTION: Basic Configuration =====
+set system host-name SECURITY-GW
+set system domain-name healthcare.local
+set system root-authentication encrypted-password "$6$srxroot"
+set system login user netadmin class super-user authentication encrypted-password "$6$srxnetadmin"
+set system login user auditor class read-only authentication encrypted-password "$6$srxauditor"
+set system services ssh
+set system services netconf ssh
+set system services web-management https interface lo0.0
+set system services snmp
+set system syslog user * any emergency
+set system syslog file messages any info
+set system ntp server 192.0.2.10
+set system ntp server 192.0.2.11
+set system time-zone UTC
+set snmp community healthnet authorization read-only
+set snmp location "Security Gateway"
+set snmp contact "netops@healthcare.local"
+commit and-quit
+! ===== END SECTION =====
+
+! ===== SECTION: Interface Configuration =====
+set interfaces ge-0/0/0 description "To CORE-ROUTER-1/2 (external)"
+set interfaces ge-0/0/0 unit 0 family inet address 10.10.255.14/30
+set interfaces ge-0/0/1 description "To Internet/ISP"
+set interfaces ge-0/0/1 unit 0 family inet address 198.51.100.2/30
+set interfaces lo0 unit 0 family inet address 10.255.2.1/32
+! ===== END SECTION =====
+
+! ===== SECTION: Security Zones =====
+set security zones security-zone trust interfaces ge-0/0/0.0 host-inbound-traffic system-services all
+set security zones security-zone untrust interfaces ge-0/0/1.0 host-inbound-traffic system-services ping
+set security zones security-zone trust interfaces lo0.0 host-inbound-traffic system-services all
+! ===== END SECTION =====
+
+! ===== SECTION: Security Policies =====
+set security policies from-zone trust to-zone untrust policy allow-hipaa-compliant match source-address any destination-address any application [ junos-https junos-ssh junos-dns junos-ntp junos-smtp junos-icmp ]
+set security policies from-zone trust to-zone untrust policy allow-hipaa-compliant then permit application-services idp
+set security policies from-zone untrust to-zone trust policy block-untrusted match source-address any destination-address any application any
+set security policies from-zone untrust to-zone trust policy block-untrusted then deny
+set security policies from-zone trust to-zone untrust policy allow-telemedicine match source-address any destination-address any application junos-h323
+set security policies from-zone trust to-zone untrust policy allow-telemedicine then permit
+set security policies from-zone trust to-zone untrust policy allow-ehr-sync match source-address any destination-address any application junos-https
+set security policies from-zone trust to-zone untrust policy allow-ehr-sync then permit
+set security policies from-zone trust to-zone untrust policy allow-alerts match source-address any destination-address any application junos-smtp
+set security policies from-zone trust to-zone untrust policy allow-alerts then permit
+set security policies from-zone trust to-zone untrust policy allow-emergency match source-address any destination-address any application junos-voip
+set security policies from-zone trust to-zone untrust policy allow-emergency then permit
+set security policies from-zone trust to-zone untrust policy default-deny match source-address any destination-address any application any
+set security policies from-zone trust to-zone untrust policy default-deny then deny
+! ===== END SECTION =====
+
+! ===== SECTION: Intrusion Prevention & Compliance =====
+set security idp idp-policy HIPAA-IDP policy action drop
+set security idp idp-policy HIPAA-IDP policy match application junos-https
+set security idp idp-policy HIPAA-IDP policy match application junos-smtp
+set security idp idp-policy HIPAA-IDP policy match application junos-ssh
+set security idp idp-policy HIPAA-IDP policy match application junos-dns
+set security idp idp-policy HIPAA-IDP policy match application junos-ntp
+set security idp idp-policy HIPAA-IDP policy match application junos-voip
+set security idp idp-policy HIPAA-IDP policy match application junos-h323
+set security idp idp-policy HIPAA-IDP policy match application junos-icmp
+set security idp idp-policy HIPAA-IDP policy then close
+set security idp security-package automatic
+set security idp security-package url https://services.netscreen.com/cgi-bin/index.cgi
+set security idp security-package proxy none
+set security idp security-package update-interval 24
+! ===== END SECTION =====
+
+---
+
+=== DEPLOYMENT RECOMMENDATIONS ===
+
+Installation Sequence:
+1. Deploy and configure core routers (CORE-ROUTER-1, CORE-ROUTER-2) with OSPF and VLAN interfaces.
+2. Deploy distribution switches (DIST-SW1, DIST-SW2), connect to core routers, configure trunks and VLANs.
+3. Deploy access switches (ACCESS-SW1, ACCESS-SW2), connect to both distribution switches, configure access/trunk ports and port security.
+4. Deploy security gateway (SECURITY-GW), connect to core routers and ISP, configure security zones and policies.
+5. Verify all inter-device links, VLANs, and OSPF adjacencies.
+6. Enable and test SNMP, syslog, and NTP on all devices.
+
+Verification Procedures:
+- Use `show interfaces terse`, `show ospf neighbor`, `show vlans`, `show security zones`, and `show security policies` on each device.
+- Confirm all P2P links are up and have correct /30 addressing.
+- Confirm OSPF adjacency and route propagation.
+- Test VLAN connectivity and segmentation with `ping` and `traceroute`.
+- Validate HIPAA-compliant policy enforcement on SECURITY-GW with test traffic.
+- Check SNMP, syslog, and NTP reachability from management systems.
+
+=== DEPLOYMENT SUCCESS CRITERIA ===
+
+✓ CONNECTIVITY: All VLANs and subnets reachable end-to-end, P2P links up, trunk links passing all VLANs  
+✓ ROUTING: OSPF adjacency established, full route propagation, static default route to SECURITY-GW  
+✓ SECURITY: HIPAA-compliant segmentation enforced, only authorized applications permitted, IDP active  
+✓ MANAGEMENT: SSH, SNMP, syslog, and NTP accessible from management network  
+✓ REDUNDANCY: Core and distribution failover tested, dual-homed access switches maintain connectivity on uplink failure
